@@ -101,11 +101,19 @@ class CameraController(
     private class CameraCaptureSessionCallback(
         private val cont: CancellableContinuation<CameraCaptureSession>,
     ) : CameraCaptureSession.StateCallback() {
-        override fun onConfigured(session: CameraCaptureSession) = cont.resume(session)
+        override fun onConfigured(session: CameraCaptureSession) {
+            Logger.i(TAG, "Camera Session configured successfully!")
+            cont.resume(session)
+        }
 
         override fun onConfigureFailed(session: CameraCaptureSession) {
             Logger.e(TAG, "Camera Session configuration failed")
             cont.resumeWithException(CameraError("Camera: failed to configure the capture session"))
+        }
+        
+        override fun onClosed(session: CameraCaptureSession) {
+            Logger.w(TAG, "Camera Session closed")
+            super.onClosed(session)
         }
     }
 
@@ -132,23 +140,36 @@ class CameraController(
         targets: List<Surface>,
         dynamicRange: Long,
     ): CameraCaptureSession = suspendCancellableCoroutine { cont ->
+        Logger.i(TAG, "createCaptureSession: Starting with ${targets.size} targets, SDK ${Build.VERSION.SDK_INT}")
+        
+        // Android 8.1: Use only preview surface, skip encoder surface
+        // LegacyCameraDevice can't detect MediaCodec surface dimensions
+        val compatibleTargets = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+            Logger.w(TAG, "Android 8.1 detected: Using preview surface only (${targets.size} -> 1)")
+            targets.take(1) // Only use first surface (preview), drop encoder surface
+        } else {
+            targets
+        }
+        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            val outputConfigurations = targets.map {
+            val outputConfigurations = compatibleTargets.map {
                 OutputConfiguration(it).apply {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         dynamicRangeProfile = dynamicRange
                     }
                 }
             }
-
+            Logger.i(TAG, "Using OutputConfiguration path for API ${Build.VERSION.SDK_INT}")
             threadManager.createCaptureSessionByOutputConfiguration(
                 camera, outputConfigurations, CameraCaptureSessionCallback(cont)
             )
         } else {
+            Logger.i(TAG, "Using legacy createCaptureSession for API ${Build.VERSION.SDK_INT}")
             threadManager.createCaptureSession(
-                camera, targets, CameraCaptureSessionCallback(cont)
+                camera, compatibleTargets, CameraCaptureSessionCallback(cont)
             )
         }
+        Logger.i(TAG, "createCaptureSession: Waiting for callback...")
     }
 
     private fun createRequestSession(
@@ -161,8 +182,16 @@ class CameraController(
             throw RuntimeException("No target surface")
         }
 
+        // Android 8.1: Use all surfaces for capture request (encoder will be added later)
         return camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-            surfaces.forEach { addTarget(it) }
+            surfaces.forEach { surf ->
+                try {
+                    addTarget(surf)
+                    Logger.i(TAG, "Added surface to capture request")
+                } catch (e: Exception) {
+                    Logger.w(TAG, "Failed to add surface to capture request: ${e.message}")
+                }
+            }
             set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
             threadManager.setRepeatingSingleRequest(captureSession, build(), captureCallback)
         }
@@ -191,8 +220,16 @@ class CameraController(
         require(captureSession != null) { "Capture session must not be null" }
         require(targets.isNotEmpty()) { " At least one target is required" }
 
+        // Android 8.1: Use only surfaces that were part of the capture session
+        val sessionTargets = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+            Logger.w(TAG, "Android 8.1: Filtering targets for capture request (${targets.size} -> 1)")
+            targets.take(1) // Only use preview surface
+        } else {
+            targets
+        }
+
         captureRequest = createRequestSession(
-            camera!!, captureSession!!, getClosestFpsRange(camera!!.id, fps), targets
+            camera!!, captureSession!!, getClosestFpsRange(camera!!.id, fps), sessionTargets
         )
     }
 
@@ -217,7 +254,18 @@ class CameraController(
     }
 
     fun addTarget(target: Surface) {
-        require(captureRequest != null) { "capture request must not be null" }
+        // Wait for camera to be ready (up to 3 seconds)
+        var attempts = 0
+        while (captureRequest == null && attempts < 30) {
+            Logger.w(TAG, "addTarget: captureRequest is null, waiting for camera (attempt ${attempts + 1}/30)")
+            Thread.sleep(100) // Wait 100ms between attempts
+            attempts++
+        }
+        
+        if (captureRequest == null) {
+            Logger.e(TAG, "addTarget: Camera not ready after 3 seconds")
+            throw IllegalStateException("Camera initialization timeout")
+        }
 
         captureRequest!!.addTarget(target)
 

@@ -35,6 +35,14 @@ import androidx.annotation.RequiresPermission
 class CameraHandlerManager : ICameraThreadManager {
     private var cameraThread = HandlerThread("CameraThread").apply { start() }
     private var cameraHandler = Handler(cameraThread.looper)
+    
+    // Ensure HandlerThread is alive before use (Android 8.1 compatibility)
+    private fun ensureThreadAlive() {
+        if (!cameraThread.isAlive) {
+            cameraThread = HandlerThread("CameraThread").apply { start() }
+            cameraHandler = Handler(cameraThread.looper)
+        }
+    }
 
     @RequiresPermission(Manifest.permission.CAMERA)
     override fun openCamera(
@@ -42,6 +50,7 @@ class CameraHandlerManager : ICameraThreadManager {
         cameraId: String,
         callback: CameraDevice.StateCallback
     ) {
+        ensureThreadAlive()
         manager.openCamera(cameraId, callback, cameraHandler)
     }
 
@@ -50,6 +59,7 @@ class CameraHandlerManager : ICameraThreadManager {
         targets: List<Surface>,
         callback: CameraCaptureSession.StateCallback
     ) {
+        ensureThreadAlive()
         @Suppress("deprecation")
         camera.createCaptureSession(targets, callback, cameraHandler)
     }

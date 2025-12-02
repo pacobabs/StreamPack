@@ -213,7 +213,13 @@ abstract class MediaCodecEncoder<T : Config>(
         synchronized(lock) {
             isOnError = false
             isStopped = false
-            mediaCodec?.start() ?: throw IllegalStateException("Can't start without configuration")
+            if (mediaCodec == null) {
+                // Android 8.1: If encoder was never configured (e.g. audio hardware unavailable),
+                // log and continue gracefully to allow video-only streaming
+                Logger.w(TAG, "MediaCodec not configured, skipping encoder start (video-only mode)")
+                return
+            }
+            mediaCodec?.start()
         }
     }
 

@@ -56,8 +56,17 @@ class AudioSource : IAudioSource {
          */
         mutedByteArray = ByteArray(bufferSize)
 
+        // Android 8.1 (API 27) compatibility fix
+        // DEFAULT audio source causes HAL failures on Android 8.1
+        // Use MIC which is more reliable on older devices
+        val audioSource = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+            MediaRecorder.AudioSource.MIC  // More compatible for Android 8.1
+        } else {
+            MediaRecorder.AudioSource.DEFAULT  // Preferred for Android 9+
+        }
+
         audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.DEFAULT, config.sampleRate,
+            audioSource, config.sampleRate,
             config.channelConfig, config.byteFormat, bufferSize
         ).also {
             processor = EffectProcessor(
@@ -79,7 +88,11 @@ class AudioSource : IAudioSource {
             if (!isRunning()) {
                 throw IllegalStateException("AudioSource: failed to start recording")
             }
-        } ?: throw IllegalStateException("AudioSource: run: : No audioRecorder")
+        } ?: run {
+            // Android 8.1: If AudioRecord failed to initialize, just skip audio silently
+            // This allows video-only streaming when audio hardware is unavailable
+            Logger.w(TAG, "AudioSource: No audioRecorder available, continuing without audio")
+        }
     }
 
     private fun isRunning() = audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING

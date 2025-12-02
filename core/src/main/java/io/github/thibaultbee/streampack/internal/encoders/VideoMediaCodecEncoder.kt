@@ -20,7 +20,9 @@ import android.graphics.SurfaceTexture
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.util.Size
 import android.view.Surface
 import io.github.thibaultbee.streampack.data.Config
@@ -74,7 +76,20 @@ class VideoMediaCodecEncoder(
             codecSurface?.useHighBitDepth = false
         }
 
-        codecSurface?.outputSurface = mediaCodec.createInputSurface()
+        val surface = mediaCodec.createInputSurface()
+        
+        // Android 8.1: Validate surface has native window before setting
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+            if (surface != null && surface.isValid) {
+                Log.i("VideoMediaCodecEncoder", "MediaCodec surface created and valid for Android 8.1")
+                codecSurface?.outputSurface = surface
+            } else {
+                Log.e("VideoMediaCodecEncoder", "MediaCodec surface is invalid on Android 8.1!")
+                codecSurface?.outputSurface = null
+            }
+        } else {
+            codecSurface?.outputSurface = surface
+        }
     }
 
     override fun createMediaFormat(config: Config, withProfileLevel: Boolean): MediaFormat {
@@ -121,7 +136,13 @@ class VideoMediaCodecEncoder(
     }
 
     val inputSurface: Surface?
-        get() = codecSurface?.inputSurface
+        get() = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+            // Android 8.1: Use outputSurface directly (from MediaCodec.createInputSurface)
+            // LegacyCameraDevice can't detect dimensions from GL-wrapped inputSurface
+            codecSurface?.outputSurface
+        } else {
+            codecSurface?.inputSurface
+        }
 
     class CodecSurface(
         private val orientationProvider: ISourceOrientationProvider?
