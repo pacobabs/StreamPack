@@ -68,27 +68,28 @@ class VideoMediaCodecEncoder(
         }
 
     override fun onNewMediaCodec(mediaCodec: MediaCodec) {
-        try {
-            val mimeType = mediaCodec.outputFormat.getString(MediaFormat.KEY_MIME)!!
-            val profile = mediaCodec.outputFormat.getInteger(MediaFormat.KEY_PROFILE)
-            codecSurface?.useHighBitDepth =
-                DynamicRangeProfile.fromProfile(mimeType, profile).isHdr
-        } catch (_: Exception) {
-            codecSurface?.useHighBitDepth = false
-        }
-
         val surface = mediaCodec.createInputSurface()
         
-        // Android 8.1: Validate surface has native window before setting
+        // Android 8.1: Use direct surface (no GL wrapper)
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
             if (surface != null && surface.isValid) {
-                Log.i("VideoMediaCodecEncoder", "MediaCodec surface created and valid for Android 8.1")
+                Logger.i(TAG, "Android 8.1: MediaCodec surface created, using directly (no GL)")
                 codecSurface?.outputSurface = surface
+                // Skip GL initialization - outputSurface setter will detect Android 8.1
             } else {
-                Log.e("VideoMediaCodecEncoder", "MediaCodec surface is invalid on Android 8.1!")
+                Logger.e(TAG, "Android 8.1: MediaCodec surface is invalid!")
                 codecSurface?.outputSurface = null
             }
         } else {
+            // Android 9+: Initialize GL wrapper for transformations
+            try {
+                val mimeType = mediaCodec.outputFormat.getString(MediaFormat.KEY_MIME)!!
+                val profile = mediaCodec.outputFormat.getInteger(MediaFormat.KEY_PROFILE)
+                codecSurface?.useHighBitDepth =
+                    DynamicRangeProfile.fromProfile(mimeType, profile).isHdr
+            } catch (_: Exception) {
+                codecSurface?.useHighBitDepth = false
+            }
             codecSurface?.outputSurface = surface
         }
     }
@@ -127,23 +128,41 @@ class VideoMediaCodecEncoder(
     }
 
     override fun startStream() {
-        codecSurface?.startStream()
+        // Android 8.1: Skip GL startStream (no GL context)
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.O_MR1) {
+            codecSurface?.startStream()
+        } else {
+            Logger.i(TAG, "Android 8.1: Skipping GL startStream (direct surface mode)")
+        }
         super.startStream()
     }
 
     override fun stopStream() {
-        try {
-            codecSurface?.stopStream()
-        } catch (e: Exception) {
-            // Android 8.1: Codec surface might be invalid, ignore
-            Logger.w(TAG, "stopStream: Error stopping codec surface, continuing", e)
+        // Android 8.1: Skip GL stopStream (no GL context)
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.O_MR1) {
+            try {
+                codecSurface?.stopStream()
+            } catch (e: Exception) {
+                Logger.w(TAG, "stopStream: Error stopping codec surface, continuing", e)
+            }
+        } else {
+            Logger.i(TAG, "Android 8.1: Skipping GL stopStream (direct surface mode)")
         }
         super.stopStream()
     }
 
     val inputSurface: Surface?
-        get() = codecSurface?.inputSurface
-        // Always use inputSurface (with SurfaceTexture + setDefaultBufferSize)
+        get() {
+            // Android 8.1: Use outputSurface directly (no GL wrapper)
+            // This avoids BufferQueue abandonment issues with EGL/GL context
+            return if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+                Logger.i(TAG, "Android 8.1: Using direct MediaCodec surface (no GL)")
+                codecSurface?.outputSurface
+            } else {
+                // Android 9+: Use GL-based inputSurface for transformations
+                codecSurface?.inputSurface
+            }
+        }
 
     class CodecSurface(
         private val orientationProvider: ISourceOrientationProvider?
@@ -168,7 +187,15 @@ class VideoMediaCodecEncoder(
 
         var outputSurface: Surface? = null
             set(value) {
+                // Android 8.1: Skip GL initialization (direct surface mode)
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+                    Logger.i("VideoMediaCodecEncoder", "Android 8.1: Setting output surface directly (no GL)")
+                    field = value
+                    return
+                }
+                
                 /**
+                 * Android 9+: Use GL-based rendering with transformations
                  * When surface is called twice without the stopStream(). When configure() is
                  * called twice for example,
                  */
