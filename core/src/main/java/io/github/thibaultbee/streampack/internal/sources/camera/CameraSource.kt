@@ -28,6 +28,7 @@ import io.github.thibaultbee.streampack.internal.sources.IVideoSource
 import io.github.thibaultbee.streampack.internal.utils.av.video.DynamicRangeProfile
 import io.github.thibaultbee.streampack.internal.utils.extensions.deviceOrientation
 import io.github.thibaultbee.streampack.internal.utils.extensions.isDevicePortrait
+import io.github.thibaultbee.streampack.logger.Logger
 import io.github.thibaultbee.streampack.internal.utils.extensions.landscapize
 import io.github.thibaultbee.streampack.internal.utils.extensions.portraitize
 import io.github.thibaultbee.streampack.utils.CameraSettings
@@ -120,12 +121,21 @@ class CameraSource(
 
     override fun stopStream() {
         if (isStreaming) {
-            checkStream()
+            try {
+                checkStream()
 
-            cameraController.unmuteVibrationAndSound()
+                cameraController.unmuteVibrationAndSound()
 
-            isStreaming = false
-            cameraController.removeTarget(encoderSurface!!)
+                isStreaming = false
+                // Android 8.1: Safe removal - encoderSurface might be null or invalid
+                encoderSurface?.let {
+                    cameraController.removeTarget(it)
+                }
+            } catch (e: Exception) {
+                // Android 8.1: Camera might be closing, ignore errors
+                Logger.w(TAG, "stopStream: Error stopping camera stream, continuing", e)
+                isStreaming = false
+            }
         }
     }
 
@@ -178,5 +188,9 @@ class CameraSource(
         override fun getDefaultBufferSize(size: Size): Size {
             return Size(max(size.width, size.height), min(size.width, size.height))
         }
+    }
+
+    companion object {
+        private const val TAG = "CameraSource"
     }
 }

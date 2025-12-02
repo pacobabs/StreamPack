@@ -122,7 +122,12 @@ class CameraController(
             session: CameraCaptureSession, request: CaptureRequest, failure: CaptureFailure
         ) {
             super.onCaptureFailed(session, request, failure)
-            Logger.e(TAG, "Capture failed  with code ${failure.reason}")
+            // Android 8.1: Capture failures are common with GL surfaces, but don't disconnect
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+                Logger.w(TAG, "Android 8.1: Capture failed with code ${failure.reason}, continuing...")
+            } else {
+                Logger.e(TAG, "Capture failed  with code ${failure.reason}")
+            }
         }
     }
 
@@ -142,13 +147,10 @@ class CameraController(
     ): CameraCaptureSession = suspendCancellableCoroutine { cont ->
         Logger.i(TAG, "createCaptureSession: Starting with ${targets.size} targets, SDK ${Build.VERSION.SDK_INT}")
         
-        // Android 8.1: Use only preview surface, skip encoder surface
-        // LegacyCameraDevice can't detect MediaCodec surface dimensions
-        val compatibleTargets = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
-            Logger.w(TAG, "Android 8.1 detected: Using preview surface only (${targets.size} -> 1)")
-            targets.take(1) // Only use first surface (preview), drop encoder surface
-        } else {
-            targets
+        // Android 8.1: Use all surfaces - inputSurface has dimensions set via SurfaceTexture
+        val compatibleTargets = targets
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+            Logger.i(TAG, "Android 8.1: Using all ${targets.size} surfaces (SurfaceTexture has dimensions)")
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -220,27 +222,29 @@ class CameraController(
         require(captureSession != null) { "Capture session must not be null" }
         require(targets.isNotEmpty()) { " At least one target is required" }
 
-        // Android 8.1: Use only surfaces that were part of the capture session
-        val sessionTargets = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
-            Logger.w(TAG, "Android 8.1: Filtering targets for capture request (${targets.size} -> 1)")
-            targets.take(1) // Only use preview surface
-        } else {
-            targets
-        }
-
+        // Android 8.1: Use all surfaces (they all have dimensions set)
         captureRequest = createRequestSession(
-            camera!!, captureSession!!, getClosestFpsRange(camera!!.id, fps), sessionTargets
+            camera!!, captureSession!!, getClosestFpsRange(camera!!.id, fps), targets
         )
     }
 
     fun stopCamera() {
-        captureRequest = null
+        // Android 8.1: Safe camera shutdown
+        try {
+            captureRequest = null
 
-        captureSession?.close()
-        captureSession = null
+            captureSession?.close()
+            captureSession = null
 
-        camera?.close()
-        camera = null
+            camera?.close()
+            camera = null
+        } catch (e: Exception) {
+            // Camera might already be closed, ignore
+            Logger.w(TAG, "stopCamera: Error closing camera, continuing", e)
+            captureRequest = null
+            captureSession = null
+            camera = null
+        }
     }
 
     fun addTargets(targets: List<Surface>) {
@@ -267,16 +271,38 @@ class CameraController(
             throw IllegalStateException("Camera initialization timeout")
         }
 
-        captureRequest!!.addTarget(target)
-
-        updateRepeatingSession()
+        // Android 8.1: Try to add target, but skip if it's not part of the session
+        try {
+            captureRequest!!.addTarget(target)
+            updateRepeatingSession()
+        } catch (e: IllegalArgumentException) {
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1 && 
+                e.message?.contains("not part of current capture session") == true) {
+                // Android 8.1: Encoder surface not in session, skip it (preview-only mode)
+                Logger.w(TAG, "Android 8.1: Skipping encoder surface (not in capture session)")
+            } else {
+                throw e
+            }
+        }
     }
 
     fun removeTarget(target: Surface) {
-        require(captureRequest != null) { "capture request must not be null" }
+        // Android 8.1: Safe removal - check if camera is still active
+        if (captureRequest == null || captureSession == null) {
+            Logger.w(TAG, "removeTarget: Camera already stopped, skipping target removal")
+            return
+        }
 
-        captureRequest!!.removeTarget(target)
-        updateRepeatingSession()
+        try {
+            captureRequest!!.removeTarget(target)
+            updateRepeatingSession()
+        } catch (e: IllegalStateException) {
+            // Camera session might be closing, ignore
+            Logger.w(TAG, "removeTarget: Camera session closing, ignoring", e)
+        } catch (e: IllegalArgumentException) {
+            // Target might not be in the request, ignore
+            Logger.w(TAG, "removeTarget: Target not in request, ignoring", e)
+        }
     }
 
     fun release() {
@@ -297,12 +323,23 @@ class CameraController(
     }
 
     fun updateRepeatingSession() {
-        require(captureSession != null) { "capture session must not be null" }
-        require(captureRequest != null) { "capture request must not be null" }
+        // Android 8.1: Safe update - check if camera is still active
+        if (captureSession == null || captureRequest == null) {
+            Logger.w(TAG, "updateRepeatingSession: Camera already stopped, skipping update")
+            return
+        }
 
-        threadManager.setRepeatingSingleRequest(
-            captureSession!!, captureRequest!!.build(), captureCallback
-        )
+        try {
+            threadManager.setRepeatingSingleRequest(
+                captureSession!!, captureRequest!!.build(), captureCallback
+            )
+        } catch (e: IllegalStateException) {
+            // Camera session might be closing, ignore
+            Logger.w(TAG, "updateRepeatingSession: Camera session closing, ignoring", e)
+        } catch (e: Exception) {
+            // Handler thread might be dead, ignore
+            Logger.w(TAG, "updateRepeatingSession: Failed to update session, ignoring", e)
+        }
     }
 
     private fun updateBurstSession() {

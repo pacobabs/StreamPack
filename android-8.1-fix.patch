@@ -1,0 +1,22 @@
+--- a/core/src/main/java/io/github/thibaultbee/streampack/internal/sources/AudioSource.kt
++++ b/core/src/main/java/io/github/thibaultbee/streampack/internal/sources/AudioSource.kt
+@@ -61,8 +61,17 @@ class AudioSource : IAudioSource {
+          */
+         mutedByteArray = ByteArray(bufferSize)
+ 
++        // Android 8.1 (API 27) compatibility fix
++        // DEFAULT audio source causes HAL failures on Android 8.1
++        // Use MIC which is more reliable on older devices
++        val audioSource = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
++            MediaRecorder.AudioSource.MIC  // More compatible for Android 8.1
++        } else {
++            MediaRecorder.AudioSource.DEFAULT  // Preferred for Android 9+
++        }
++
+         audioRecord = AudioRecord(
+-            MediaRecorder.AudioSource.DEFAULT, config.sampleRate,
++            audioSource, config.sampleRate,
+             config.channelConfig, config.byteFormat, bufferSize
+         ).also {
+             processor = EffectProcessor(
+

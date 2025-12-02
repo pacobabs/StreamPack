@@ -83,6 +83,7 @@ class CameraHandlerManager : ICameraThreadManager {
         captureRequest: CaptureRequest,
         callback: CameraCaptureSession.CaptureCallback
     ): Int {
+        ensureThreadAlive()
         return captureSession.setRepeatingRequest(captureRequest, callback, cameraHandler)
     }
 
@@ -91,6 +92,7 @@ class CameraHandlerManager : ICameraThreadManager {
         captureRequests: List<CaptureRequest>,
         callback: CameraCaptureSession.CaptureCallback
     ): Int {
+        ensureThreadAlive()
         return captureSession.captureBurst(captureRequests, callback, cameraHandler)
     }
 

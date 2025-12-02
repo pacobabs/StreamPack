@@ -34,6 +34,7 @@ import io.github.thibaultbee.streampack.internal.orientation.ISourceOrientationL
 import io.github.thibaultbee.streampack.internal.orientation.ISourceOrientationProvider
 import io.github.thibaultbee.streampack.internal.utils.av.video.DynamicRangeProfile
 import io.github.thibaultbee.streampack.listeners.OnErrorListener
+import io.github.thibaultbee.streampack.logger.Logger
 import java.util.concurrent.Executors
 
 /**
@@ -131,18 +132,18 @@ class VideoMediaCodecEncoder(
     }
 
     override fun stopStream() {
-        codecSurface?.stopStream()
+        try {
+            codecSurface?.stopStream()
+        } catch (e: Exception) {
+            // Android 8.1: Codec surface might be invalid, ignore
+            Logger.w(TAG, "stopStream: Error stopping codec surface, continuing", e)
+        }
         super.stopStream()
     }
 
     val inputSurface: Surface?
-        get() = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
-            // Android 8.1: Use outputSurface directly (from MediaCodec.createInputSurface)
-            // LegacyCameraDevice can't detect dimensions from GL-wrapped inputSurface
-            codecSurface?.outputSurface
-        } else {
-            codecSurface?.inputSurface
-        }
+        get() = codecSurface?.inputSurface
+        // Always use inputSurface (with SurfaceTexture + setDefaultBufferSize)
 
     class CodecSurface(
         private val orientationProvider: ISourceOrientationProvider?
@@ -321,5 +322,9 @@ class VideoMediaCodecEncoder(
             surfaceTexture?.release()
             surfaceTexture = null
         }
+    }
+
+    companion object {
+        private const val TAG = "VideoMediaCodecEncoder"
     }
 }

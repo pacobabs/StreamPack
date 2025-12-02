@@ -337,14 +337,42 @@ abstract class BaseStreamer(
      * @see [stopStream]
      */
     private suspend fun stopStreamImpl() {
-        videoSource?.stopStream()
-        videoEncoder?.stopStream()
-        audioEncoder?.stopStream()
-        audioSource?.stopStream()
+        // Android 8.1: Safe stop - wrap each stop in try-catch to prevent crashes
+        try {
+            videoSource?.stopStream()
+        } catch (e: Exception) {
+            Logger.w(TAG, "stopStreamImpl: Error stopping video source, continuing", e)
+        }
+        
+        try {
+            videoEncoder?.stopStream()
+        } catch (e: Exception) {
+            Logger.w(TAG, "stopStreamImpl: Error stopping video encoder, continuing", e)
+        }
+        
+        try {
+            audioEncoder?.stopStream()
+        } catch (e: Exception) {
+            Logger.w(TAG, "stopStreamImpl: Error stopping audio encoder, continuing", e)
+        }
+        
+        try {
+            audioSource?.stopStream()
+        } catch (e: Exception) {
+            Logger.w(TAG, "stopStreamImpl: Error stopping audio source, continuing", e)
+        }
 
-        muxer.stopStream()
+        try {
+            muxer.stopStream()
+        } catch (e: Exception) {
+            Logger.w(TAG, "stopStreamImpl: Error stopping muxer, continuing", e)
+        }
 
-        endpoint.stopStream()
+        try {
+            endpoint.stopStream()
+        } catch (e: Exception) {
+            Logger.w(TAG, "stopStreamImpl: Error stopping endpoint, continuing", e)
+        }
     }
 
     /**
