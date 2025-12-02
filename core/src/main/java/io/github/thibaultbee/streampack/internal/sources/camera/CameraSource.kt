@@ -89,14 +89,14 @@ class CameraSource(
 
     @RequiresPermission(Manifest.permission.CAMERA)
     suspend fun startPreview(cameraId: String = this.cameraId, restartStream: Boolean = false) {
-        // Android 8.1: Use both preview and encoder surfaces
-        // The key is that both must have the same dimensions (set by encoder)
+        // Android 8.1: Use both surfaces for visible preview, accept flashing for portrait video
+        // Trade-off: Visible camera preview + portrait video vs some flashing
         var targets = mutableListOf<Surface>()
         previewSurface?.let { targets.add(it) }
         encoderSurface?.let { targets.add(it) }
         
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
-            Logger.i(TAG, "Android 8.1: Using ${targets.size} surfaces (preview + encoder)")
+            Logger.w(TAG, "Android 8.1: Using both surfaces (portrait encoder + landscape preview = some flashing)")
         }
         
         cameraController.startCamera(cameraId, targets, dynamicRangeProfile.dynamicRange)

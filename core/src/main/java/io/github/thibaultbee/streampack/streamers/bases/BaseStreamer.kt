@@ -166,11 +166,18 @@ abstract class BaseStreamer(
         null
     }
     protected var videoEncoder = if (videoSource != null) {
+        // Android 8.1: Pass null orientation provider to prevent dimension swapping
+        val orientationProviderForEncoder = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+            null // No orientation adjustments - use dimensions exactly as specified
+        } else {
+            sourceOrientationProvider
+        }
+        
         VideoMediaCodecEncoder(
             videoEncoderListener,
             onInternalErrorListener,
             videoSource.hasSurface,
-            sourceOrientationProvider
+            orientationProviderForEncoder
         )
     } else {
         null
