@@ -118,6 +118,15 @@ class VideoMediaCodecEncoder(
 
     override fun extendMediaFormat(config: Config, format: MediaFormat) {
         val videoConfig = config as VideoConfig
+        
+        // Android 8.1: Skip orientation adjustments - use dimensions as-is
+        // Without GL transformations, dimensions must match preview surface exactly
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+            Logger.i(TAG, "Android 8.1: Using resolution as-is (no orientation adjustment)")
+            // Keep the original resolution from config
+            return
+        }
+        
         orientationProvider?.let {
             it.getOrientedSize(videoConfig.resolution).apply {
                 // Override previous format

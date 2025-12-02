@@ -295,7 +295,14 @@ class CameraController(
 
         try {
             captureRequest!!.removeTarget(target)
-            updateRepeatingSession()
+            
+            // Android 8.1: Don't update repeating session if no targets left
+            // This happens when using single surface mode
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+                Logger.i(TAG, "Android 8.1: Target removed, skipping repeating session update (will stop camera)")
+            } else {
+                updateRepeatingSession()
+            }
         } catch (e: IllegalStateException) {
             // Camera session might be closing, ignore
             Logger.w(TAG, "removeTarget: Camera session closing, ignoring", e)

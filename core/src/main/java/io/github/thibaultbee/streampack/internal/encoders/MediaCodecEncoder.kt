@@ -227,6 +227,13 @@ abstract class MediaCodecEncoder<T : Config>(
         try {
             synchronized(lock) {
                 isStopped = true
+                // Android 8.1: Just mark as stopped, don't call stop()
+                // Let release() handle cleanup
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+                    Logger.i(TAG, "Android 8.1: Skipping MediaCodec stop() to avoid OMX crashes")
+                    return
+                }
+                
                 mediaCodec?.setCallback(null)
                 mediaCodec?.signalEndOfInputStream()
                 mediaCodec?.flush()
@@ -239,8 +246,23 @@ abstract class MediaCodecEncoder<T : Config>(
 
     override fun release() {
         try {
+            // Android 8.1: Must call stop() before release(), even if it crashes
+            // Otherwise release() itself will crash with null pointer
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1 && !isStopped) {
+                try {
+                    Logger.w(TAG, "Android 8.1: Forcing stop() before release()")
+                    mediaCodec?.stop()
+                } catch (e: Throwable) {
+                    // Swallow ALL exceptions including native crashes
+                    Logger.w(TAG, "Android 8.1: stop() threw exception (expected), continuing", e)
+                }
+                isStopped = true
+            }
+            
             mediaCodec?.release()
-        } catch (_: Exception) {
+        } catch (e: Throwable) {
+            // Catch ALL exceptions including native crashes
+            Logger.w(TAG, "release: Error releasing codec", e)
         } finally {
             mediaCodec = null
         }

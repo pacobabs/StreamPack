@@ -18,6 +18,7 @@ package io.github.thibaultbee.streampack.internal.sources.camera
 import android.Manifest
 import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
+import android.os.Build
 import android.util.Size
 import android.view.Surface
 import androidx.annotation.RequiresPermission
@@ -88,9 +89,16 @@ class CameraSource(
 
     @RequiresPermission(Manifest.permission.CAMERA)
     suspend fun startPreview(cameraId: String = this.cameraId, restartStream: Boolean = false) {
+        // Android 8.1: Use both preview and encoder surfaces
+        // The key is that both must have the same dimensions (set by encoder)
         var targets = mutableListOf<Surface>()
         previewSurface?.let { targets.add(it) }
         encoderSurface?.let { targets.add(it) }
+        
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+            Logger.i(TAG, "Android 8.1: Using ${targets.size} surfaces (preview + encoder)")
+        }
+        
         cameraController.startCamera(cameraId, targets, dynamicRangeProfile.dynamicRange)
 
         targets = mutableListOf()

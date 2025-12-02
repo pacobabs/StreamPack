@@ -17,6 +17,7 @@ package io.github.thibaultbee.streampack.streamers.bases
 
 import android.Manifest
 import android.content.Context
+import android.os.Build
 import androidx.annotation.RequiresPermission
 import io.github.thibaultbee.streampack.data.AudioConfig
 import io.github.thibaultbee.streampack.data.Config
@@ -325,9 +326,17 @@ abstract class BaseStreamer(
 
         stopStreamImpl()
 
-        // Encoder does not return to CONFIGURED state... so we have to reset everything...
-        resetAudio()
-        resetVideo()
+        // Android 8.1: Don't reset encoders - single-use stream
+        // OMX encoder crashes when trying to reuse/reconfigure
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.O_MR1) {
+            Logger.w(TAG, "Android 8.1: Stream stopped - encoders will NOT be reset (single-use mode)")
+            // Don't call resetAudio() or resetVideo() 
+            // The streamer instance should be disposed after stop
+        } else {
+            // Encoder does not return to CONFIGURED state... so we have to reset everything...
+            resetAudio()
+            resetVideo()
+        }
         isStreaming = false
     }
 
